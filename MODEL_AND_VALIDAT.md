@@ -1,5 +1,64 @@
 # Model e Validação 
 
+Primeiro vamos compreender algumas logicas que são importantes para construirmos os model:
+
+- struct -> molde de dados
+
+```
+pub struct ClientName(pub String); // tuple struct com 1 campo
+```
+
+- impl -> adiciona comportamentos a este molde
+
+1- impl NomeDaStruct (ex: ClientName)
+        └── "Estou definindo métodos que só existem em ClienteName
+              Você mesmo está inventando esses métodos.
+```
+// COMPORTAMENTO: define o que a struct SABE FAZER
+impl ClientName {
+    pub fn new(value: String) -> Self {
+        ClientName(value)
+    }
+    
+    pub fn len(&self) -> usize {
+        self.0.len() // self.0 = primeiro campo da tuple struct
+    }
+}
+```
+
+2- impl AlgumaTrait for NomeDaStruct (ex: impl From<String> for ClientName)
+            └── "Estou cumprindo um CONTRATO que já existe no Rust/biblioteca"
+                 O From, Display, etc. já existem você só esta dizendo 
+                 como sua struct se comporta dentro deste contrato
+
+````
+impl From<String> for ClientName{
+//   ^^^^^^^^^^^^      ^^^^^^^^^^^^^
+//   TRAIT              TIPO que recebe a trait
+  fn from(value: String){
+    ClientName(value)
+  }
+}
+
+````
+
+Quando você usa a struct (ex: ClientName), 
+você tem acesso aos campos (dados) + todos os métodos definidos nos blocos "impl".
+
+
+- for -> significa implemente um trait (contrato, caracteristica) para um tipo 
+
+```
+impl [O QUE VOCÊ QUER ENSINAR] for [QUEM VAI APRENDER]
+
+impl fmt::Display for PlanType
+//   ^^^^^^^^^^^^      ^^^^^^^^
+//   trait Display      quem implementa
+
+```
+
+### Legenda do Model usado no projeto 
+
 ```
 #[derive(
     Debug,          // permite imprimir com {:?} no log/terminal
@@ -289,3 +348,20 @@ pub struct CreateClientDto {
 }
 
 ````
+
+
+Resumo:
+┌─────────────────────────────────────────────────────┐
+│  struct ClientName(pub String)                       │
+│       └── define o DADO que a struct carrega         │
+├─────────────────────────────────────────────────────┤
+│  impl ClientName { ... }                             │
+│       └── métodos PRÓPRIOS da struct                 │
+├─────────────────────────────────────────────────────┤
+│  impl From<String> for ClientName { ... }            │
+│       └── implementa uma TRAIT (contrato externo)    │
+│           "ensina" a struct a se converter de String │
+├─────────────────────────────────────────────────────┤
+│  impl Display for ClientName { ... }                 │
+│       └── "ensina" a struct a se exibir com {}       │
+└─────────────────────────────────────────────────────┘
