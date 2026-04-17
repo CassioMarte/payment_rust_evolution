@@ -1,0 +1,1 @@
+pub mob client_model;
