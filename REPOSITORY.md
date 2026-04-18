@@ -372,3 +372,90 @@ impl ClientRepository for SqlxClientRepository{
     bind $2 = "João"
     bind $3 = "joao@email.com"
     bind $4 = uuid
+
+
+Vamos a algo importante e complexo: 
+
+````
+let mut binds: Vec<Box<dyn sqlx::Encode<'_, Postgres> + Send + Sync>> = Vec::new();
+````
+
+Vec  <  Box  <  dyn  Encode  +  Send + Sync  >  >
+ │       │       │      │           │
+ │       │       │      │           └── seguro entre threads
+ │       │       │      └── sabe virar valor SQL
+ │       │       └── tipo real descoberto em runtime
+ │       └── guarda no heap, tamanho fixo (ponteiro)
+ └── array dinâmico
+
+ O UPDATE é dinâmico. Você não sabe quais campos vão chegar.
+ Então você precisa de um Vec que guarde tipos diferentes ao mesmo tempo — String, ClientEmail, PlanType, Uuid... O problema é que o Rust não deixa isso por padrão.
+
+- Vec<...> -> É um array dinâmico, você já sabe. O que muda é o que está dentro.
+
+- Box<...> -> O Rust precisa saber o tamanho de tudo em tempo de compilação. ClientName tem um tamanho, PlanType tem outro, Uuid tem outro.
+
+ex: 
+----------------------------------------------------------------------------
+ O Rust pergunta: "qual o tamanho de cada elemento do Vec?"
+ ClientName  = 24 bytes?
+ PlanType    = 1 byte?
+ Uuid        = 16 bytes?
+
+Rust responde: "Impossível ter um Vec com tamanhos diferentes por elemento"
+
+O Box resolve isso colocando o valor no heap e guardando só o ponteiro.
+Com Box, todo elemento tem o mesmo tamanho: um ponteiro
+Box<ClientName> = ponteiro (8 bytes)
+Box<PlanType>   = ponteiro (8 bytes)  ← todos iguais agora
+Box<Uuid>       = ponteiro (8 bytes)
+
+-----------------------------------------------------------------------------
+
+Pensa no Box como um envelope. O conteúdo pode ter qualquer tamanho — o envelope em si sempre tem o mesmo tamanho.
+
+- dyn sqlx::Encode<'_, Postgres> ->
+
+  dyn -> significa "despacho dinâmico" — o tipo real só é conhecido em tempo de execução.
+
+  sqlx::Encode -> é um trait do SQLx que significa "esse tipo sabe como se transformar em valor SQL"
+   
+   ----------------------------------------------
+   ClientName implementa Encode -> sabe virar SQL
+   PlanType implementa Encode  -> sabe virar SQL  
+   Uuid implementa Encode     ->  sabe virar SQL
+   ----------------------------------------------
+
+Então dyn Encode significa:
+   "qualquer tipo que saiba se transformar em valor SQL".
+   Você não diz qual tipo — só que ele cumpre esse contrato.
+
+````
+// É a mesma ideia do ClientRepository:
+Arc<dyn ClientRepository>  // qualquer coisa que seja um repository
+Box<dyn Encode>            // qualquer coisa que saiba virar SQL
+````
+
+- '_ -> Essa é a parte mais estranha. É um lifetime — o Rust controla quanto tempo cada valor vive na memória.
+
+````
+Encode<'_, Postgres>
+//     ^^
+//     lifetime anônimo — o Rust infere sozinho
+````
+
+O Encode precisa de um lifetime porque ele pode guardar referências internamente. 
+O '_ é você dizendo pro Rust: "você descobre o tempo de vida, eu confio em você". 
+É um atalho pra não escrever <'a> e gerenciar manualmente.
+
+- Send + Sync -> 
+
+   Send -> "pode ser ENVIADO para outra thread"
+   Sync -> "pode ser ACESSADO por múltiplas threads ao mesmo tempo"
+
+let mut binds: Vec<Box<dyn sqlx::Encode<'_, Postgres> + Send + Sync>> = Vec::new();
+
+Tradução: 
+"Cria um Vec mutável que guarda, em heap, qualquer tipo que saiba se transformar 
+ em valor SQL para o PostgreSQL, e que seja seguro para usar em múltiplas threads
+ — e o Rust vai inferir os tempos de vida sozinho."
