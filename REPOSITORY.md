@@ -231,5 +231,144 @@ impl ClientRepository for SqlxClientRepository{
         Ok(client)
     }
 
+    // Update a parte mais complexa
+    // sql dinâmico baseado nos campos recebidos
+    async fn update(
+        &self,
+        id: Uuid,
+        updated_client: UpdateClientDto
+    ) -> Result<Option<Client>, ApiError> {
+
+        // Começa com a base do SQL — updated_at sempre atualiza
+        let mut query_builder = String::from(
+            "UPDATE clients SET updated_at = NOW()"
+        )
+        
+         // Vec de valores a fazer bind — dinâmico pois não sabe quais campos virão
+        // Box<dyn sqlx::Encode> = qualquer tipo que o SQLx saiba bindар
+        let mut binds: Vec<Box<dyn sqlx::Encode<'_, Postgres> + Send + Sync>> = Vec::new();
+
+        // Começa em 2 pois $1 será reservado para o WHERE id = $1 no final
+        let mut param_count = 2;
+
+
+        // Adiciona só os campos que vieram preenchidos (Some)
+        // None = cliente não quer mudar esse campo → não inclui no SQL
+        if let Some(name) = updated_client.name{
+            // ex: ", name = $2"
+            query_builder.push_str(&format!(
+                ", name = ${}", param_count
+            ))
+            
+            // empacota o valor para bind posterior
+            binds.push(Box::new(ClientName(name)))
+            param_count += 1; // próximo parâmetro será $3
+        }
+
+         if let Some(email) = updated_client.email {
+            query_builder.push_str(&format!(", email = ${}", param_count));
+            binds.push(Box::new(ClientEmail(email)));
+            param_count += 1;
+        }
+        if let Some(address) = updated_client.address {
+            query_builder.push_str(&format!(", address = ${}", param_count));
+            binds.push(Box::new(ClientAddress(address)));
+            param_count += 1;
+        }
+        if let Some(plan) = updated_client.plan {
+            query_builder.push_str(&format!(", plan = ${}", param_count));
+            binds.push(Box::new(plan));
+            param_count += 1;
+        }
+
+
+        // Se nenhum campo foi enviado além de updated_at
+        // param_count ainda é 2 → nada foi adicionado
+        // Retorna o cliente atual sem fazer UPDATE desnecessário
+        if param_count == 2{
+            return self.find_by_id(id).await
+                .map(|c| c.map(|client| client));
+                // map(|c| c) → se Ok(Some(client)) retorna Ok(Some(client))
+                // se Ok(None) retorna Ok(None)
+        }
+
+        // Fecha o SQL com o WHERE e o RETURNING
+        // ex final: "UPDATE clients SET updated_at = NOW(), name = $2 WHERE id = $3 RETURNING *"
+        query_builder.push_str(&format!(" WHERE id = ${} RETURNING *", param_count));
+
+        // O id é o ÚLTIMO bind
+        binds.push(Box::new(id));
+
+        // Constrói a query com todos os binds dinâmicos
+        let mut query = sqlx::query_as::<Postgres, Client>(&query_builder);
+        for bind in binds {
+            query = query.bind(bind); // adiciona cada valor em ordem
+        }
+
+         let client = query
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| {
+                // Verifica email duplicado no update também
+                if let sqlx::Error::Database(db_err) = &e {
+                    if db_err.is_unique_violation() {
+                        return ApiError::Conflict(format!(
+                            "Email já cadastrado: {}",
+                            // unwrap_or_default → se email for None usa ""
+                            updated_client.email.clone().unwrap_or_default()
+                        ));
+                    }
+                }
+                ApiError::DatabaseError(format!("Falha ao atualizar cliente: {}", e))
+            })?;
+
+        Ok(client)
+
+        // Olhar logo abaixo explicação visual:
+    }
+
+    async fn delete(&self, id: Uuid) -> Result<bool, ApiError> {
+        let result = query("DELETE FROM clients WHERE id = $1")
+            .bind(id)
+            // execute → não retorna linhas — só quantidade afetada
+            .execute(&self.pool)
+            .await
+            .map_err(|e| ApiError::DatabaseError(
+                format!("Falha ao deletar cliente: {}", e)
+            ))?;
+
+        // rows_affected() → quantas linhas foram deletadas
+        // > 0 = encontrou e deletou → true
+        // = 0 = não encontrou → false
+        Ok(result.rows_affected() > 0)
+    }
 }
 ````
+
+- explicação visual:
+
+1- Cliente envia: { "name": "João" }
+  Só name veio (email e address são None)
+
+  O Sql construuído fica:
+  "UPDATE clients SET 
+        update_at = NOW(), 
+        name= $2
+      where id = $3
+      RETURNING *   
+   "
+   .bind $2 = "João"
+   .bind $3 = uuid
+
+2- Cliente envia: { "name": "João", "email": "joao@email.com" }
+
+    O SQL construído fica:
+      "UPDATE clients SET 
+            updated_at = NOW(), 
+            name = $2,
+            email = $3
+           WHERE id = $4
+           RETURNING *"
+    bind $2 = "João"
+    bind $3 = "joao@email.com"
+    bind $4 = uuid
