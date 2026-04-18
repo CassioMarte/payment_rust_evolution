@@ -107,4 +107,129 @@ pub trait ClientRepository {
 // Você não precisa escrever isso — a macro faz por você
 ````
 
+````
+use async_trait::async_trait;
+use uuid::Uuid;
 
+use crate::model::client_model::{
+    Client, CreateClientDto, UpdateClientDto
+}
+
+use crate::errors::ApiErros;
+
+// #[async_trait] → macro que permite async fn neste trait
+// pub trait → contrato público que qualquer struct pode implementar
+// Send + Sync → garante que pode ser usado entre threads com segurança
+// Send  = pode ser ENVIADO para outra thread
+// Sync  = pode ser ACESSADO por múltiplas threads ao mesmo tempo
+// necessário porque o Actix usa múltiplas threads
+
+#[async_trait]
+pub trait ClientRepository: Send + Sync{
+
+    // Cada linha é uma PROMESSA:
+    // "Quem implementar este trait DEVE ter estas funções"
+
+    async fn create(&self, new_client: CreateClientDto) -> Result<Client, ApiError>;
+
+    async fn find_all(&self) -> Result<Vec<Client>, ApiError>;
+
+    async fn find_by_id(&self, id: Uuid) -> Result<Option<Client>>, ApiError>;
+
+    async fn update(&self, id: Uuid, update_client: UpdateClientDto) -> Result<Option<Client>, ApiError>;
+    
+     async fn delete(&self, id: Uuid) -> Result<bool, ApiError>;
+
+}
+````
+
+
+````
+use async_trait::async_trait;
+use sqlx::{query, query_as, PgPool, Postgres};
+use uuid::Uuid;
+use chrono::Utc;
+
+use crate::errors::ApiError;
+use crate::models::client::{
+    Client, CreateClientDto, UpdateClientDto,
+    ClientName, ClientEmail, ClientAddress, PlanType
+};
+
+use crate::traits::client_repository::ClientRepository;
+
+pub struct SqlxClientRepository {
+    pool: PgPool, // ← a conexão com o banco
+}
+
+impl SqlxClientRepository {
+    pub fn new(pool:PgPool) -> Self {
+        SqlxClientRepository {pool}
+    }
+}
+
+#[async_trait]
+impl ClientRepository for SqlxClientRepository{
+
+    async fn create(&self, new_client: CreateClientDto) -> Result<Client, ApiError> {
+        let client = query_as::<Postgres, Client>(
+            "INSERT INTO clients (name, email, address, plan, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6) RETURNING *"
+        )
+        // .0 acessa o String dentro do Value Object
+        // ClientName("João").0 → "João"
+        .bind(new_client.name.0)
+        .bind(new_client.email.0)
+        .bind(new_client.address.0)
+        .bind(new_client.plan)
+        .bind(Utc::now().naive_utc()) // created_at
+        .bind(Utc::now().naive_utc()) // updated_at
+        .fetch_one(&self.pool)
+        .await
+        // map_err → transforma sqlx::Error em ApiError
+        // com tratamento específico para email duplicado
+        .map_err(|e| {
+            // Verifica se é erro de violação de unicidade (email duplicado)
+            if let sqlx::Error::Database(db_err) = &e {
+                if db_err.is_unique_violation() {
+                    // erro específico com mensagem clara
+                    return ApiError::Conflict(
+                        format!("Email já cadastrado: {}", new_client.email.0)
+                    );
+                }
+            }
+            // qualquer outro erro do banco
+            ApiError::DatabaseError(format!("Falha ao criar cliente: {}", e))
+        })?;
+
+        Ok(client)
+    }
+
+    async fn find_all(&self) -> Result<Vec<Client>, ApiError> {
+        let clients = query_as::<Postgres, Client>("SELECT * FROM clients")
+            .fetch_all(&self.pool)
+            .await
+            // map_err simples — só um tipo de erro possível aqui
+            .map_err(|e| ApiError::DatabaseError(
+                format!("Falha ao buscar clientes: {}", e)
+            ))?;
+
+        Ok(clients)
+    }
+
+    async fn find_by_id(&self, id: Uuid) -> Result<Option<Client>, ApiError> {
+        let client = query_as::<Postgres, Client>(
+            "SELECT * FROM clients WHERE id = $1"
+        )
+        .bind(id)
+        .fetch_optional(&self.pool) // Option<Client> — não erro se não encontrar
+        .await
+        .map_err(|e| ApiError::DatabaseError(
+            format!("Falha ao buscar cliente por ID: {}", e)
+        ))?;
+
+        Ok(client)
+    }
+
+}
+````
