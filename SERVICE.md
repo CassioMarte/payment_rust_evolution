@@ -128,6 +128,16 @@ Com `?` propaga e sai da função se Err
 
 
 
+OBS:
+````
+pub async fn create_client(...) -> Result<Client, ApiError> {
+    let client = self.repository.create(new_client).await?; // 1. Extrai o Client
+    Ok(client) // 2. Envelopa de novo em Ok()
+}
+Isso funciona? Sim. Mas é redundante (mais código para fazer a mesma coisa). ]
+````
+
+
 O TIPO de retorno da função:
 pub async fn create_client(...) -> Result<Client, ApiError>
 

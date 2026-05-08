@@ -15,8 +15,8 @@ impl ClientService{
   }
 
   pub async fn create(&self, new_client:CreateClientDto) -> Result<Client, ApiError> {
-    // OBS: a validação de entrada ja ocorre no CreateClientDto via #[validate]
-    self.repository.create(new_client).await?
+    // OBS: a validação de entrada já ocorre no CreateClientDto via #[validate]
+    self.repository.create(new_client).await
   }
 
   pub async fn find_all(&self) -> Result<Vec<Client>, ApiError> {
