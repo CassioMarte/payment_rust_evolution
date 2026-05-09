@@ -125,3 +125,50 @@ pub async fn delete_client_handler(
 }
 ````
 
+- Dois tipos basicos de retorno no handler:
+
+impl Responder
+````
+pub async fn create_payment_handler(...) -> impl Responder {
+    match payment_service::create(...).await {
+        Ok(p)  => HttpResponse::Created().json(p),
+        Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
+        // ↑ todo erro vira 500 — sem distinção
+        // match repetido em cada handler
+    }
+}
+````
+
+- Result<HttpResponse, ApiError>  ApiError(Erro personalizado)
+
+````
+pub async fn create_client_handler(...) -> Result<HttpResponse, ApiError> {
+    let client = client_service.create_client(dto).await?;
+    Ok(HttpResponse::Created().json(client))
+    // ? cuida de TODOS os erros automaticamente
+    // ApiError::NotFound    → 404
+    // ApiError::Conflict    → 409
+    // ApiError::DatabaseError → 500
+    // sem match, sem repetição
+}
+
+````
+
+
+- Como o `?` e o ApiError trabalham juntos:
+
+````
+handler chama service.create_client().await?
+                ↓
+        service retorna Err(ApiError::Conflict("..."))
+                ↓
+        ? propaga o erro para o Actix
+                ↓
+        Actix detecta que ApiError implementa ResponseError
+                ↓
+        Actix chama ApiError::error_response()
+                ↓
+        HttpResponse::build(StatusCode::CONFLICT).json(...)
+                ↓
+        cliente recebe HTTP 409 automaticamente ✅
+````
