@@ -55,3 +55,39 @@ pub fn config(cfg: &mut web::ServiceConfig) {
 ````
 
 
+- Main
+
+Agora com as rotas, handlers, service, repository e model precisamos conectar tudo e neste projeto vamos fazer isso na main.rs
+
+````
+#[actix_web::main]
+async fn main() -> std::io::Result<()> {
+    dotenv().ok();
+
+    let database_url = env::var("DATABASE_URL")
+        .expect("DATABASE_URL must be set");
+
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&database_url)
+        .await
+        .expect("Failed to create pool.");
+
+    // Monta a cadeia de dependências:
+    // Pool -> Repository -> Service
+    let repository = Arc::new(SqlxClientRepository::new(pool));
+    let client_service = Arc::new(ClientService::new(repository));
+
+    HttpServer::new(move || {
+        App::new()
+            // Disponibiliza o service para todos os handlers via injeção
+            .app_data(web::Data::new(client_service.clone()))
+
+            // Registra todas as rotas de client de uma vez
+            .configure(routes::client_routes::config)
+    })
+    .bind(("127.0.0.1", 8080))?
+    .run()
+    .await
+}
+````

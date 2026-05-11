@@ -3,12 +3,12 @@ use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
 use dotenv::dotenv;
 use std::env;
 
-// mod models;
-// mod repositories;
-// mod services;
-// mod handlers;
-// mod routes;
-// mod errors;
+mod model;
+mod repository;
+mod service;
+mod handler;
+mod routes;
+mod error;
 // mod traits;
 // mod utils;
 
@@ -23,9 +23,15 @@ async fn main() -> std::io::Result<()> {
         .await
         .expect("Failed to create pool.");
 
+    let repository = Arc::new(SqlxClientRepository::new(pool));
+
+    let service = Arc::new(ClientService::new(repository))
+
     HttpServer::new(move || {
         App::new()
-            .app_data(web::Data::new(pool.clone()))
+           // .app_data(web::Data::new(pool.clone())) -> versão antes do service
+           .app_data(web::Data::new(service))
+           .configure(routes::client_routes::config)
            
     })
     .bind(("127.0.0.1", 8080))?
