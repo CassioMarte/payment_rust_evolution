@@ -190,8 +190,8 @@ async fn test_create_client_sucess() {
         plan: PlanType::Anual,
     }
 
-    // configuração do mock -> explicação no final deste service
-    mock_repo.expect_create()
+    // configuração do mock -> explicação no final deste service 
+    mock_repo.expect_create() // -> expect_create vem do mock  impl MockClientRepository
       .once()
       .withf(move |dto| {
         dto.name.0 == "Test Client" &&
@@ -236,6 +236,150 @@ async fn test_feat_all(){
     // Verifica se retornou exatamente 1 item — o que colocamos no mock
     assert_eq!(result.unwrap().len(), 1);
 }
+
+#[tokio::test]
+async fn test_get_client_by_id_success(){
+    let mut mock_repo = MockClientRepository::new();
+
+    let expected_client = create_mock_client();
+
+    // salvo o id em uma variavel para usar 
+    let client_id = expected_client.id;
+    
+
+    mock_repo.expect_find_by_id()
+        .once()
+        // .with() -> versão mais simples do .withf()
+        .with( 
+            // predicate::eq(client_id) -> verifica se o id recebido é igual ao esperado
+             mockall::predicate::eq(client_id)
+        )
+         // Some(client) -> simula banco encontrando o cliente
+        .return_once(|_| Ok(Some(expected_client.clone())));
+
+    let service = ClientService::new(Arc::new(mock_repo));
+    let result = service.get_client_by_id(client_id).await;
+       
+    assert!(result.is_ok());
+    // Verifica se o ID retornado é o mesmo que pedimos
+    assert_eq!(result.unwrap().id, client_id);
+}
+
+
+// IMPORTANTE -> teste de erro
+#[tokio::test]
+async fn test_get_client_by_id_not_found(){
+    let mut mock_repo = MockClientRepository::new();
+
+    let client_id = Uuid::new_v4(); // UUID que "não existe no banco"
+
+   mock_repo.expect_find_by_id()
+        .once()
+        .with(
+            mockall::predicate::eq(client_id)
+        )
+        .return_once(|_| Ok(None));
+        // None → simula banco não encontrando o cliente
+        // Ok(None) pois não é erro de banco — o cliente simplesmente não existe
+
+    let service = ClientService::new(Arc::new(mock_repo));
+    
+    let result = service.get_client_by_id(client_id).await;
+   
+    // o service converte o None para Err(ApiError::NotFound)
+
+    assert!(result.is_err());
+
+    // matches! → verifica se o erro é do tipo correto
+    // ApiError::NotFound(_) -> o _ ignora o conteúdo da String
+    // Leitura: "afirmo que o erro é um NotFound (não importa a mensagem)"
+    assert!(matches!(result.unwrap_err(), ApiError::NotFound(_)));
+}
+
+#[tokio::test]
+async fn test_update_client_sucess(){
+    let mut mock_repo = MockClientRepository::new();
+
+    let mut existing_client = create_mock_client() // mut é importante pois vamos alterar dados do client
+
+    let client_id = existing_client.id;
+
+    let updated_name = "Updated Name".to_string();
+
+    // DTO com só o nome preenchido — update parcial
+    let updated_dto = UpdateClientDto {
+        name: Some(updated_name.clone()),
+        email: None,    // não muda
+        address: None,  // não muda
+        plan: None,     // não muda
+    };
+
+    // Simula o client já com o nome atualizado
+    existing_client.name = updated_name.clone();
+
+    mock_repo.expect_update()
+        .once()
+        .withf(move |id, dto| {
+            // Verifica DOIS argumentos: id e dto
+            *id == client_id &&                        // id correto?
+            dto.name == Some(updated_name.clone())     // nome correto?
+            // *id → desreferencia pois id é &Uuid no closure
+        })
+        .return_once(|_, _| Ok(Some(existing_client.clone())));
+        // |_, _| → dois argumentos ignorados (id e dto)
+
+    let service = ClientService::new(Arc::new(mock_repo));
+    let result = service.update_client(client_id, updated_dto).await;
+
+    assert!(result.is_ok());
+    // Verifica se o nome foi realmente atualizado
+    assert_eq!(result.unwrap().name, updated_name);    
+
+}
+
+#[tokio::test]
+async fn test_delete_client_success() {
+    let mut mock_repo = MockClientRepository::new();
+
+    let client_id = Uuid::new_v4();
+  
+    mock_repo.expect_delete()
+        .once()
+        .with( 
+            mockall::predicate::eq(client_id)
+        )
+        .return_once(|_| Ok(true));
+        // true → encontrou e deletou com sucesso
+
+    let service = ClientService::new(Arc::new(mock_repo));
+    let result = service.delete_client(client_id).await;
+
+    assert!(result.is_ok());
+    // delete retorna Ok(()) — sem dados para verificar
+
+} 
+
+#[tokio::test]
+async fn test_delete_client_not_found() {
+    let mut mock_repo = MockClientRepository::new();
+    let client_id = Uuid::new_v4();
+
+    mock_repo.expect_delete()
+        .once()
+        .with(
+            mockall::predicate::eq(client_id)
+        )
+        .return_once(|_| Ok(false));
+        // false → não encontrou o cliente para deletar
+
+    let service = ClientService::new(Arc::new(mock_repo));
+    let result = service.delete_client(client_id).await;
+
+    // O service converte false → Err(ApiError::NotFound)
+    assert!(result.is_err());
+    assert!(matches!(result.unwrap_err(), ApiError::NotFound(_)));
+}
+
 ````
 
 // configuração do mock de create:
@@ -263,3 +407,13 @@ mock_repo.expect_create()
         .return_once(|_| Ok(expected_client.clone()));
 
 ````
+
+- o mockall lê essa implementação fake da trait e cria automaticamente:
+
+| Método da trait | Método de expectation gerado |
+| --------------- | ---------------------------- |
+| `create()`      | `expect_create()`            |
+| `find_all()`    | `expect_find_all()`          |
+| `find_by_id()`  | `expect_find_by_id()`        |
+| `update()`      | `expect_update()`            |
+| `delete()`      | `expect_delete()`            |
