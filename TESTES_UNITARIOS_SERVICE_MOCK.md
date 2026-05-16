@@ -417,3 +417,19 @@ mock_repo.expect_create()
 | `find_by_id()`  | `expect_find_by_id()`        |
 | `update()`      | `expect_update()`            |
 | `delete()`      | `expect_delete()`            |
+
+
+Obs:
+````
+// Com automock → MockClientRepository (gerado automaticamente)
+let mut mock_repo = MockClientRepository::new();
+
+// Com mock!{} → MockClientRepositoryMock (você escolheu o nome)
+let mut mock_repo = MockClientRepositoryMock::new();
+
+// A partir daqui — IDÊNTICO nos dois casos:
+mock_repo.expect_create().once().return_once(|_| Ok(client));
+let service = ClientService::new(Arc::new(mock_repo));
+let result = service.create_client(dto).await;
+assert!(result.is_ok());
+````
