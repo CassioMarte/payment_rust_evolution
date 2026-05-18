@@ -126,7 +126,7 @@ async fn setup_app() -> App<
     let client_service = Arc::new(ClientService::new(client_repository));
 
 
-    // test::init_service → inicializa a app Actix em modo teste
+    // test::init_service -> inicializa a app Actix em modo teste
     // Sem abrir porta de rede — tudo em memória
     test::init_service(
         App::new()
@@ -134,6 +134,151 @@ async fn setup_app() -> App<
             .configure(client_routes::config), // mesmas rotas do main.rs
     )
     .await
+}
+
+#[tokio::test]
+async fn test_create_client_handler_sucess(){
+    let app = setup_app().await();
+
+    let new_client_dto = CreateClientDto {
+        name: ClientName("Test Client".to_string()),
+        email: ClientEmail("test@example.com".to_string()),
+        address: ClientAddress("123 Test".to_string()),
+        plan: PlanType::Mensal,
+    }
+  
+    // Monta a requisição HTTP fake
+    let req = test::TestRequest::post()
+          .uri("/clients")              // POST/clients
+          .set_json(&new_client_dto)    // corpo = JSON do DTO
+          .to_request()                 // constrói a requisição
+
+    // Envia a requisição para a app e aguarda a resposta
+    let resp = test::call_service(&app, req).await;
+
+    // Verifica o STATUS CODE da resposta
+    assert_eq!(resp.status(), StatusCode::CREATED); // exatamente 201
+    
+    // Lê e desserializa o CORPO da resposta
+    let client: Client = test.read_body_json(resp).await;
+
+    // Verifica os DADOS retornados
+    // .0 acessa o String dentro do Value Object
+    assert_eq!(client.name, new_client_dto.name.0);
+    assert_eq!(client.email, new_client_dto.email.0);
+
+}
+
+#[tokio::test]
+async fn test_create_client_handler_invalid_input() {
+    let app = setup_app().await();
+
+    let new_client_dto = CreateClientDto {
+        name: ClientName("a".to_string()),          // 1 char -> min=3 -> inválido
+        email: ClientEmail("invalid-email".to_string()), // sem @ -> inválido
+        address: ClientAddress("short".to_string()), // 5 chars -> min=5 -> na borda
+        plan: PlanType::Mensal,
+    };
+
+    let req = test::TestRequest::post()
+        .uri("/clients")
+        .set_json(&new_client_dto)
+        .to_request();
+
+    let resp = test::call_service(&app, req).await;
+
+    // Espera 400 Bad Request — dado inválido
+    assert!(resp.status().is_bad_request());
+    // ⚠️ PROBLEMA: CreateClientDto usa Value Objects com #[validate]
+    // A validação só roda se você chamar .validate() manualmente
+    // ou usar Validated<T> extractor
+    // Se o handler usa web::Json<CreateClientDto> sem validação
+    // esse teste pode PASSAR mesmo com dados inválidos!
+}
+
+#[tokio::test]
+async fn test_get_all_clients_handler_success() {
+    let app = setup_app().await;
+
+    // Cria um client primeiro para a lista não ficar vazia
+    let new_client_dto = CreateClientDto {
+        name: ClientName("Test Client".to_string()),
+        email: ClientEmail("test@example.com".to_string()),
+        address: ClientAddress("123 Test".to_string()),
+        plan: PlanType::Mensal,
+    };
+
+    // Agora busca todos
+    let req_create = test::TestRequest::post()
+        .uri("/clients")
+        .set_json(&new_client_dto)
+        .to_request();
+
+    test::call_service(&app, req_create).await; // cria — ignora a resposta
+
+    // Agora busca todos
+    let req = test::TestRequest::get()
+        .uri("/clients")
+        .to_request();
+
+    let resp = test::call_service(&app, req).await;
+
+    assert!(resp.status().is_ok()); // 200
+
+    let clients: Vec<Client> = test::read_body_json(resp).await;
+
+    assert!(!clients.is_empty());
+
+    assert_eq!(clients.len(), 1); // só o que criamos — banco estava limpo
+}
+
+#[tokio::test]
+async fn test_get_client_by_id_handler_success() {
+    let app = setup_app().await;
+
+    let new_client_dto = CreateClientDto {
+        name: ClientName("Test Client".to_string()),
+        email: ClientEmail("test@example.com".to_string()),
+        address: ClientAddress("123 Test".to_string()),
+        plan: PlanType::Mensal,
+    };
+
+
+    let req_create = test::TestRequest::post()
+        .uri("/clients")
+        .set_json(&new_client_dto)
+        .to_request();
+
+    let resp_create = test::call_service(&app, req_create).await;
+
+    // Desserializa a resposta do create para pegar o ID gerado
+    let created_client: Client = test::read_body_json(resp_create).await;
+
+    // Vamos usar o id na rota aqui
+    let req = test::TestRequest::get()
+        .uri(&format!("/clients/{}", created_client.id)) // ← ID real
+        .to_request();
+
+    let resp = test::call_service(&app. req).await;
+
+    assert!(resp.status().is_ok());
+
+    let client: Client = test::read_body_json(resp).await;
+
+    assert_eq!(client.id, created_client.id); // mesmo ID
+} 
+
+#[tokio::test]
+async fn test_get_client_by_id_handler_not_found() {
+    let app = setup_app().await();
+
+    let non_existent_id = Uuid::new_v4();
+
+    let req = test::TestRequest::get()
+        .uri(&format!("/clients/{}", non_existent_id))
+        .to_request();
+
+    let res
 }
 
 ````

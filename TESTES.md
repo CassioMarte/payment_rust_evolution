@@ -51,3 +51,18 @@ cargo test -- --nocapture
 
 ## Roda testes em paralelo (padrão) ou sequencial
 cargo test -- --test-threads=1
+
+
+````
+Teste de Model              Teste de Service           Teste de Integração
+(model_test.rs)             (service_test.rs)          (handler_test.rs)
+────────────────            ─────────────────          ────────────────────
+Sem banco                   Sem banco                  COM banco real
+Sem mock                    COM mock                   Sem mock
+Sem HTTP                    Sem HTTP                   COM HTTP fake
+#[test]                     #[tokio::test]             #[tokio::test]
+Mais rápido                 Rápido                     Mais lento
+Testa: validação            Testa: regras              Testa: fluxo completo
+       tipos                        negócio                    HTTP → Banco
+
+````
