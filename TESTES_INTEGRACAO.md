@@ -272,13 +272,121 @@ async fn test_get_client_by_id_handler_success() {
 async fn test_get_client_by_id_handler_not_found() {
     let app = setup_app().await();
 
+    // UUID gerado aleatoriamente — certamente não existe no banco limpo
     let non_existent_id = Uuid::new_v4();
 
     let req = test::TestRequest::get()
         .uri(&format!("/clients/{}", non_existent_id))
         .to_request();
+    let resp = test::call_service(&app, req).await;
 
-    let res
+    // Espera 404 Not Found
+    assert!(resp.status().is_not_found());
+}
+
+#[tokio::test]
+async fn test_update_client_handler_success() {
+    let app = setup_app().await;
+
+    let new_client_dto = CreateClientDto{
+        name: ClientName("Test Up".to_string()),
+        emaii: ClientEmail("client_email@ex.com".to_string()),
+        address: ClientAddress("123 ad".to_string()),
+        plan: PlanType::Mensal
+    }
+
+    let req_create = test::TestRequest::post()
+        .uri("/clients")
+        .set_json(&new_client_dto)
+        .to_request();
+
+    // Cria o client original
+    let resp_create = test::call_service(&app, req_create).await;
+    let created_client: Client = test::read_body_json(resp_create).await;
+
+    let updated_dto = UpdateClientDto {
+        name: Some("Updated Client 3".to_string()),
+        email: None,                // não muda
+        address: None,              // não muda
+        plan: Some(PlanType::Anual),
+    }
+
+    let req = test:TestRequest::put()
+        .uri("/clients/{}", created_client.id)
+        .set_json(&updated_dto)
+        .to_request();
+
+    let resp = test::call_service(&app, req).await;
+
+    assert!(resp.status().is_ok());
+
+    let client: Client = test::read_body_json(resp).await;
+
+    // Verifica que os campos mudaram
+    assert_eq!(client.name, "Updated Client 3");
+    assert_eq!(client.plan, PlanType::Anual);
+    // email e address não foram enviados → não mudaram
+}
+
+#[tokio::test]
+async fn test_update_client_handler_not_found() {
+    let app = setup_app().await;
+    let non_existent_id = Uuid::new_v4();
+
+    let req = test::TestRequest::put()
+        .uri(&format!("/clients/{}", non_existent_id))
+        .set_json(&updated_dto)
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+
+    assert!(resp.status().is_not_found()); // 404
+}
+
+#[tokio::test]
+async fn test_delete_client_handler_success() {
+    let app = setup_app().await;
+
+    // 1. Cria
+    let created_client: Client = test::read_body_json(resp_create).await;
+
+    // 2. Deleta
+    let req = test::TestRequest::delete()
+        .uri(&format!("/clients/{}", created_client.id))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+
+    assert!(resp.status().is_no_content()); // 204
+
+    // 3. Confirma que foi deletado — tenta buscar e espera 404
+    let req_get = test::TestRequest::get()
+        .uri(&format!("/clients/{}", created_client.id))
+        .to_request();
+    let resp_get = test::call_service(&app, req_get).await;
+
+    assert!(resp_get.status().is_not_found()); // 404
+    // Esta verificação extra é o que torna este teste EXCELENTE
+    // Não confia só no status 204 — confirma que realmente sumiu
+}
+
+
+#[tokio::test]
+async fn test_delete_client_handler_not_found() {
+    let app = setup_app().await;
+    let non_existent_id = Uuid::new_v4();
+
+    let req = test::TestRequest::delete()
+        .uri(&format!("/clients/{}", non_existent_id))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+
+    assert!(resp.status().is_not_found()); // 404 
 }
 
 ````
+
+
+Usuário real:    Postman/Frontend → Internet → Porta 8080 → main.rs → App → Handler
+
+Teste:           test::TestRequest → test::call_service → setup_app → App → Handler
+
+O test::TestRequest substitui o Postman/Frontend, e o setup_app substitui o main.rs — a App, as rotas e os handlers são exatamente os mesmos. Por isso teste de integração é tão valioso — você testa o código real, só muda quem faz a chamada.
